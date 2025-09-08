@@ -1,0 +1,5 @@
+# Spring Boot 설정파일 제외
+/backend/src/main/resources/application.properties
+
+
+

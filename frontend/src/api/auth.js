@@ -6,6 +6,18 @@ const api = axios.create({
   withCredentials: true
 })
 
+// 공통 에러 메시지 추출기
+function getErrorMessage(e) {
+  const r = e?.response
+  return (
+    r?.data?.error ||
+    r?.data?.message ||
+    (typeof r?.data === 'string' ? r.data : '') ||
+    e.message ||
+    '요청 실패'
+  )
+}
+
 // ── 요청 인터셉터: 토큰 첨부
 api.interceptors.request.use(cfg => {
   const token = localStorage.getItem('token')
@@ -50,23 +62,41 @@ api.interceptors.response.use(
         isRefreshing = false
       }
     }
-    return Promise.reject(err)
+    // ❗여기서 그대로 reject하면 프론트에서 이유 파악이 어려우므로, 메시지 정리
+    return Promise.reject(new Error(getErrorMessage(err)))
   }
 )
 
 // === 공개 API들 ===
+// 중복 확인은 그대로
 export const checkUsername = (loginId) =>
   api.get('/auth/check-username', { params: { loginId } }).then(r => r.data)
 
 export const checkEmail = (email) =>
   api.get('/auth/check-email', { params: { email } }).then(r => r.data)
 
-export const signup = (payload, verificationCode) =>
-  api.post(`/auth/signup?verificationCode=${encodeURIComponent(String(verificationCode ?? ''))}`, payload)
-     .then(r => r.data)
+// ⭐ signup: 서버 에러문구를 Error로 던지기
+export const signup = async (payload, verificationCode) => {
+  try {
+    const { data } = await api.post(
+      `/auth/signup?verificationCode=${encodeURIComponent(String(verificationCode ?? ''))}`,
+      payload,
+      { headers: { 'Content-Type': 'application/json' } }
+    )
+    return data
+  } catch (e) {
+    throw new Error(getErrorMessage(e))
+  }
+}
 
-export const login = (payload) =>
-  api.post('/auth/login', payload).then(r => r.data)
+export const login = async (payload) => {
+  try {
+    const { data } = await api.post('/auth/login', payload)
+    return data
+  } catch (e) {
+    throw new Error(getErrorMessage(e))
+  }
+}
 
 export const logout = () =>
   api.post('/auth/logout').then(r => r.data)
@@ -75,14 +105,32 @@ export const getMe = () =>
   api.get('/me').then(r => r.data)
 
 // 이메일 인증
-export const sendEmailCode = (email) =>
-  api.post('/auth/email/send', { email }).then(r => r.data)
+export const sendEmailCode = async (email) => {
+  try {
+    const { data } = await api.post('/auth/email/send', { email })
+    return data
+  } catch (e) {
+    throw new Error(getErrorMessage(e))
+  }
+}
 
-export const verifyEmailCode = (email, code) =>
-  api.post('/auth/email/verify', { email, code }).then(r => r.data)
+export const verifyEmailCode = async (email, code) => {
+  try {
+    const { data } = await api.post('/auth/email/verify', { email, code })
+    return data
+  } catch (e) {
+    throw new Error(getErrorMessage(e))
+  }
+}
 
 // ✅ 새 비밀번호 재설정
-export const resetPassword = (email, code, newPassword) =>
-  api.post('/auth/reset-password', { email, code, newPassword }).then(r => r.data)
+export const resetPassword = async (email, code, newPassword) => {
+  try {
+    const { data } = await api.post('/auth/reset-password', { email, code, newPassword })
+    return data
+  } catch (e) {
+    throw new Error(getErrorMessage(e))
+  }
+}
 
 export default api

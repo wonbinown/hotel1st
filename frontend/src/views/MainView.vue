@@ -58,6 +58,11 @@ async function logout () {
     window.location.replace('/login')
   }
 }
+
+/* ✅ 예약 페이지로 이동 */
+function goReservation () {
+  router.push('/reservation')
+}
 </script>
 
 <template>
@@ -71,6 +76,8 @@ async function logout () {
       <div class="row gap">
         <button class="btn primary" @click="checkToken">토큰 확인(/api/me)</button>
         <button class="btn" @click="logout">로그아웃</button>
+        <!-- ✅ 예약하기 버튼 -->
+        <button class="btn success" @click="goReservation">예약하기</button>
       </div>
 
       <p class="hint" v-if="msg">{{ msg }}</p>
@@ -88,5 +95,6 @@ async function logout () {
 .row{display:flex;align-items:center}.gap{gap:10px}
 .btn{padding:.65rem 1rem;border:1px solid #30343a;border-radius:10px;background:#171a1f;color:#e5e7eb;cursor:pointer}
 .btn.primary{background:#6b46c1;border-color:#6b46c1}
+.btn.success{background:#22c55e;border-color:#22c55e;color:#fff} /* ✅ 예약하기 스타일 */
 .hint{color:#cbd5e1}.mt{margin-top:12px}
 </style>

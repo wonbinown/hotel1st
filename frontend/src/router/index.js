@@ -1,23 +1,46 @@
+// src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
 import SignupView from '@/views/SignupView.vue'
 import LoginView from '@/views/LoginView.vue'
 import MainView from '@/views/MainView.vue'
-import FindPasswordView from '@/views/FindPasswordView.vue' // 새 비밀번호 찾기
+import FindPasswordView from '@/views/FindPasswordView.vue'
+
+// 예약 관련
+import ReservationPage from '@/views/reservation/ReservationPage.vue'
+
+// ✅ 결제 결과 페이지 (SFC 만든 그대로 import)
+import PaymentSuccess from '@/views/reservation/PaymentSuccess.vue'
+import PaymentFail from '@/views/reservation/PaymentFail.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/signup', component: SignupView },
-    { path: '/login',  component: LoginView  },
+    { path: '/login', component: LoginView },
     { path: '/find-password', component: FindPasswordView },
-    { path: '/main',   component: MainView, meta: { requiresAuth: true } },
-    { path: '/', redirect: '/main' }
-  ]
+    { path: '/main', component: MainView, meta: { requiresAuth: true } },
+
+    // 예약 플로우
+    { path: '/reservation', component: ReservationPage },
+
+    // ✅ 토스 결제 결과 콜백 라우트
+    //    /pay/success?paymentKey=...&orderId=...&amount=...
+    { path: '/pay/success', name: 'PaySuccess', component: PaymentSuccess },
+    //    /pay/fail?message=...&code=...
+    { path: '/pay/fail', name: 'PayFail', component: PaymentFail },
+
+    { path: '/', redirect: '/main' },
+
+    // ⚠️ 맨 마지막 404
+    { path: '/:pathMatch(.*)*', redirect: '/main' }
+  ],
+  scrollBehavior() {
+    return { top: 0 }
+  }
 })
 
-// ✅ 소셜 리다이렉트(#token 또는 ?token)를 먼저 흡수하고 URL 정리
+// (beforeEach 훅은 그대로 유지)
 router.beforeEach((to, from, next) => {
-  // 1) hash(#token=...) 또는 query(?token=...)에서 토큰 추출
   const hash = to.hash || window.location.hash
   const m = hash && hash.match(/token=([^&]+)/)
   const tokenFromHash = m ? decodeURIComponent(m[1]) : null
@@ -26,18 +49,15 @@ router.beforeEach((to, from, next) => {
   if (tokenFromHash || tokenFromQuery) {
     const token = tokenFromHash || tokenFromQuery
     localStorage.setItem('token', token)
-    // URL에서 해시/쿼리 제거 (화면은 그대로)
     window.history.replaceState({}, '', to.path)
   }
 
-  // 2) 이후 토큰 기준으로 접근 제어
   const token = localStorage.getItem('token')
 
-  // 보호 라우트는 토큰 필수
-  if (to.meta.requiresAuth && !token) return next('/login')
-
-  // 로그인/회원가입 페이지에 토큰이 있으면 메인으로
-  if ((to.path === '/login' || to.path === '/signup') && token) return next('/main')
+  // ✅ 결제 콜백 페이지는 로그인 없이 접근 가능해야 함
+  const isPayCallback = to.path.startsWith('/pay/')
+  if (!isPayCallback && to.meta.requiresAuth && !token) return next('/login')
+  if (!isPayCallback && (to.path === '/login' || to.path === '/signup') && token) return next('/main')
 
   next()
 })

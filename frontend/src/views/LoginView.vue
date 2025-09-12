@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { login } from '@/api/auth'
 
@@ -8,34 +8,33 @@ const loginId = ref('')
 const password = ref('')
 const msg = ref('')
 const loading = ref(false)
+const show = ref(false) // 비밀번호 보기/숨기기
+const rememberId = ref(false) // ✅ 아이디 기억하기
 
-/* 비밀번호 보기/숨기기 */
-const show = ref(false)
+ // 앱 켤 때 저장된 아이디 자동 채움
+ onMounted(() => {
+   const saved = localStorage.getItem('remember_login_id')
+   if (saved) {
+     loginId.value = saved
+     rememberId.value = true
+  }
+})
 
-async function onLogin() {
-  msg.value = '';
-  loading.value = true;
-  try {
-    const { token } = await login({ loginId: loginId.value, password: password.value });
-    localStorage.setItem('token', token);
-    router.push('/main');
-  } catch (e) {
-    const err = e?.response?.data?.error;
-    const attempts = e?.response?.data?.attempts ?? 0; // 서버에서 온 실패 횟수
-    const locked   = e?.response?.data?.locked ?? false;
-
-    if (locked) {
-      msg.value = '계정이 잠겼습니다. 1시간 후에 다시 시도해주세요.';
-    } else if (err === 'INVALID_CREDENTIALS') {
-      msg.value = `아이디 또는 비밀번호가 올바르지 않습니다. (틀린 횟수: ${attempts})`;
-    } else {
-      msg.value = err || '로그인 실패';
-    }
-  } finally {
-    loading.value = false;
+async function onLogin () {
+  msg.value=''; loading.value=true
+  try{
+    const { token } = await login({ loginId: loginId.value, password: password.value })
+    localStorage.setItem('token', token)
+    // ✅ remember 처리
+     if (rememberId.value) localStorage.setItem('remember_login_id', loginId.value)
+     else localStorage.removeItem('remember_login_id')
+    router.push('/main')
+  }catch(e){
+    msg.value = e?.response?.data?.error || '로그인 실패'
+  }finally{
+    loading.value=false
   }
 }
-
 </script>
 
 <template>
@@ -58,7 +57,8 @@ async function onLogin() {
         <h2 class="title">로그인</h2>
         <p class="subtitle">계정 정보를 입력해주세요.</p>
 
-        <div class="form">
+        <!-- ✅ 엔터 제출 가능 -->
+        <form class="form" @submit.prevent="onLogin">
           <div class="field">
             <label class="sr-only" for="loginId">아이디</label>
             <input
@@ -69,6 +69,7 @@ async function onLogin() {
               autocomplete="username"
               inputmode="email"
               required
+              autofocus
             />
           </div>
 
@@ -108,35 +109,44 @@ async function onLogin() {
             <RouterLink class="link" to="/find-password">비밀번호 찾기</RouterLink>
           </div>
 
-          <button class="btn primary" :disabled="loading" @click="onLogin">
+          <!-- ✅ 아이디 기억하기 -->
+         <label class="remember">
+           <input type="checkbox" v-model="rememberId" />
+          <span>아이디 기억하기</span>
+         </label>
+
+          <!-- ✅ 클릭/엔터 모두 제출 -->
+          <button class="btn primary" type="submit" :disabled="loading">
             <span v-if="!loading">로그인</span>
             <span v-else class="spinner" aria-label="진행중"></span>
           </button>
+        </form>
 
-          <div class="divider"><span>또는</span></div>
+        <div class="divider"><span>또는</span></div>
 
-          <div class="social-icons">
-            <a class="icon-btn google"
-               href="http://localhost:8888/oauth2/authorization/google?prompt=select_account"
-               aria-label="Google로 로그인">
-              <img class="icon-img" src="https://developers.google.com/identity/images/g-logo.png" alt="" />
-            </a>
-
-            <a class="icon-btn naver"
-               href="http://localhost:8888/oauth2/authorization/naver?auth_type=reprompt"
-               aria-label="Naver로 로그인">
-              <img class="icon-img invert" src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/naver.svg" alt="" />
-            </a>
-
-            <a class="icon-btn kakao"
-               href="http://localhost:8888/oauth2/authorization/kakao?prompt=login"
-               aria-label="Kakao로 로그인">
-              <img class="icon-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/KakaoTalk_logo.svg/960px-KakaoTalk_logo.svg.png" alt="" />
-            </a>
-          </div>
-
-          <p class="text-sm center" v-if="msg">{{ msg }}</p>
+        <!-- 소셜 로그인 -->
+        <div class="social-icons">
+          <!-- Google -->
+          <a class="icon-btn google"
+             href="http://localhost:8888/oauth2/authorization/google?prompt=select_account"
+             aria-label="Google로 로그인">
+            <img class="icon-img" src="https://developers.google.com/identity/images/g-logo.png" alt="" />
+          </a>
+          <!-- Naver -->
+          <a class="icon-btn naver"
+             href="http://localhost:8888/oauth2/authorization/naver?auth_type=reprompt"
+             aria-label="Naver로 로그인">
+            <img class="icon-img invert" src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/naver.svg" alt="" />
+          </a>
+          <!-- Kakao -->
+          <a class="icon-btn kakao"
+             href="http://localhost:8888/oauth2/authorization/kakao?prompt=login"
+             aria-label="Kakao로 로그인">
+            <img class="icon-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/KakaoTalk_logo.svg/960px-KakaoTalk_logo.svg.png" alt="" />
+          </a>
         </div>
+
+        <p class="text-sm center" v-if="msg">{{ msg }}</p>
       </div>
     </section>
   </div>
@@ -286,4 +296,11 @@ async function onLogin() {
 
 /* 안전장치 */
 *, *::before, *::after { box-sizing: border-box; }
+
+/* ✅ 기억하기 체크박스 */
+.remember{
+  display:flex; align-items:center; gap:8px;
+  margin:6px 0 2px; color:#334155; font-size:14px; user-select:none;
+}
+.remember input{ width:16px; height:16px }
 </style>

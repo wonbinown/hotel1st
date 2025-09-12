@@ -6,8 +6,6 @@ import {
   sendEmailCode, verifyEmailCode
 } from '@/api/auth'
 
-const showTerms = ref(false)
-
 const router = useRouter()
 
 /* ---------------- State ---------------- */
@@ -42,6 +40,8 @@ let cooldownTimer = null
 const show1 = ref(false)
 const show2 = ref(false)
 
+/*약관 확인*/
+const showTerms = ref(false)
 /* 연락처 010-xxxx-xxxx */
 const phone2 = ref('')
 const phone3 = ref('')
@@ -286,6 +286,7 @@ async function onSubmit () {
     router.push('/login')
   } catch (e) {
     msg.value = e?.response?.data?.error || e?.response?.data?.message || '가입 실패'
+    msg.value = e?.message   // ← 여기서 정확한 사유가 한국어/영어로 바로 보임
   } finally { loading.value = false }
 }
 </script>
@@ -420,7 +421,7 @@ async function onSubmit () {
           <label class="sr-only" for="birth">생년월일</label>
           <input id="birth" class="input" ref="birthRef" v-model="form.birthDate" type="date" placeholder="YYYY-MM-DD" required />
 
-<!--약관동의-->
+          <!-- 약관 동의 -->
           <label class="agree">
     <input type="checkbox" v-model="agree" required />
     <span>
@@ -473,7 +474,6 @@ async function onSubmit () {
       </div>
     </div>
   </div>
-
 
           <div class="row between hint">
             <span>계정이 있으신가요?</span>
@@ -656,5 +656,4 @@ async function onSubmit () {
 .link-button:hover {
   text-decoration: none;
 }
-
 </style>

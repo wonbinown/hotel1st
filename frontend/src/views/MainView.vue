@@ -61,7 +61,8 @@ async function logout () {
 
 /* ✅ 예약 페이지로 이동 */
 function goReservation () {
-  router.push('/reservation')
+  //router.push('/reservation')
+   router.push('/reservation-ready')
 }
 </script>
 
@@ -77,7 +78,7 @@ function goReservation () {
         <button class="btn primary" @click="checkToken">토큰 확인(/api/me)</button>
         <button class="btn" @click="logout">로그아웃</button>
         <!-- ✅ 예약하기 버튼 -->
-        <button class="btn success" @click="goReservation">예약하기</button>
+        <button class="btn success" @click="goReservation">예약하러가기</button>
       </div>
 
       <p class="hint" v-if="msg">{{ msg }}</p>

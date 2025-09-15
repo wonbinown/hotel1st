@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
+import org.springframework.http.HttpMethod; // ← 추가
 @Configuration
 @RequiredArgsConstructor
 public class SecurityConfig {
@@ -41,7 +41,7 @@ public class SecurityConfig {
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
 
     @Bean
-    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
+    PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
 
     @Bean
     public DaoAuthenticationProvider authProvider() {
@@ -64,13 +64,23 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-            	.requestMatchers("/confirm").permitAll()     // ← 추가
-            	.requestMatchers("/pay/**").permitAll()
-                .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
-                .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/error").permitAll()
-                .anyRequest().authenticated()
-            )
+            	    .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()                 // CORS preflight
+            	    .requestMatchers(HttpMethod.GET, "/api/hotels/featured").permitAll()    // 특집 호텔 조회
+            	    .requestMatchers(HttpMethod.POST, "/api/reservations/hold").permitAll() // 예약 홀드 생성
+            	    .requestMatchers(HttpMethod.POST, "/api/reservations/hold").permitAll()
+                    .requestMatchers(HttpMethod.DELETE, "/api/reservations/hold/**").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/reservations/holds/release-expired").hasRole("ADMIN")//비상용
+            	    // (빠른예약 쓰면 아래도 허용)
+            	    // .requestMatchers(HttpMethod.POST, "/api/reservations/quick").permitAll()
+
+            	    .requestMatchers("/confirm").permitAll()
+            	    .requestMatchers("/pay/**").permitAll()
+            	    .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+            	    .requestMatchers("/api/auth/**").permitAll()
+            	    .requestMatchers("/api/hotels/**").permitAll() // 있어도 무방
+            	    .requestMatchers("/error").permitAll()
+            	    .anyRequest().authenticated()
+            	)
             // 기본 폼/Basic 비활성
             .formLogin(form -> form.disable())
             .httpBasic(basic -> basic.disable())

@@ -4,6 +4,8 @@ import SignupView from '@/views/SignupView.vue'
 import LoginView from '@/views/LoginView.vue'
 import MainView from '@/views/MainView.vue'
 import FindPasswordView from '@/views/FindPasswordView.vue'
+//원빈 코드
+import ReservationReadyPage from '@/views/reservation/ReservationReadyPage.vue'
 
 // 예약 관련
 import ReservationPage from '@/views/reservation/ReservationPage.vue'
@@ -22,6 +24,8 @@ const router = createRouter({
 
     // 예약 플로우
     { path: '/reservation', component: ReservationPage },
+    //예약 레디 플로우
+    { path: '/reservation-ready', name: 'reservationReady', component: ReservationReadyPage, meta: { requiresAuth: true } },
 
     // ✅ 토스 결제 결과 콜백 라우트
     //    /pay/success?paymentKey=...&orderId=...&amount=...

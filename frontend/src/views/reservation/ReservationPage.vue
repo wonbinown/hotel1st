@@ -1,40 +1,121 @@
 <!-- src/views/reservation/ReservationPage.vue -->
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+/**
+ * 예약 확정 페이지(결제 직전)
+ * - 쿼리에서 holdCode / holdExpiresAt / 호텔/룸타입/날짜를 받아 표시
+ * - 상단에 남은 시간 카운트다운
+ * - 만료 시 결제 비활성화
+ * - '홀드 취소' 버튼 제공(DELETE /reservations/hold/{holdCode})
+ */
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { cancelReservationHold } from '@/api/reservation'
 
-/* ================= 가격/쿠폰 ================= */
-const price = reactive({ base: 240000, taxes: 24000, fee: 5000 })
+/* ---------------------- 라우팅 & 쿼리 파라미터 ---------------------- */
+const route  = useRoute()
+const router = useRouter()
 
+// Ready 페이지에서 넘겨준 값들(없으면 Ready로 돌려보냄)
+const holdCode      = ref(String(route.query.holdCode || ''))
+const holdExpiresAt = ref(String(route.query.holdExpiresAt || ''))
+const hotelId       = ref(route.query.hotelId ? Number(route.query.hotelId) : null)
+const roomTypeId    = ref(route.query.roomTypeId ? Number(route.query.roomTypeId) : null)
+const ratePlanId    = ref(route.query.ratePlanId ? Number(route.query.ratePlanId) : null)
+const userId        = ref(route.query.userId ? Number(route.query.userId) : null)
+const guests        = ref(route.query.guests ? Number(route.query.guests) : 1)
+const checkIn       = ref(String(route.query.checkIn || ''))
+const checkOut      = ref(String(route.query.checkOut || ''))
+// (선택) Ready에서 같이 넘겨줬다면 총액도 표시
+const quotedTotal   = ref(route.query.totalAmount ? Number(route.query.totalAmount) : null)
+
+/* ---------------------- 타이머(만료 카운트다운) ---------------------- */
+const remainSec = ref(0)
+const expired   = computed(() => remainSec.value <= 0)
+let timerId = null
+
+function tick () {
+  const expMs = Date.parse(holdExpiresAt.value)
+  if (Number.isNaN(expMs)) {
+    remainSec.value = 0
+  } else {
+    remainSec.value = Math.max(0, Math.floor((expMs - Date.now()) / 1000))
+  }
+  if (remainSec.value === 0 && timerId) {
+    clearInterval(timerId)
+    timerId = null
+  }
+}
+function startTimer() { tick(); timerId = setInterval(tick, 1000) }
+onMounted(() => {
+  if (!holdCode.value || !holdExpiresAt.value) {
+    alert('예약 홀드 정보가 없어 처음 화면으로 이동합니다.')
+    router.replace('/reservation-ready')
+    return
+  }
+  startTimer()
+})
+onUnmounted(() => { if (timerId) clearInterval(timerId) })
+
+const remainText = computed(() => {
+  const s = Math.max(0, remainSec.value)
+  const m = Math.floor(s / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return `${m}:${ss}`
+})
+
+/* ---------------------- 홀드 취소 ---------------------- */
+const cancelling = ref(false)
+async function cancelHold() {
+  if (!holdCode.value) return
+  if (!confirm('현재 예약 홀드를 취소할까요?')) return
+  try {
+    cancelling.value = true
+    await cancelReservationHold(holdCode.value)
+    alert('홀드를 취소했습니다.')
+    router.replace('/reservation-ready')
+  } catch (e) {
+    console.error(e)
+    alert(e?.response?.data?.message ?? '홀드 취소에 실패했습니다.')
+  } finally {
+    cancelling.value = false
+  }
+}
+
+/* ---------------------- 가격/쿠폰(샘플) ---------------------- */
+/** 실제로는 백엔드 계산값을 쓰는 게 안전.
+ * 여기서는 UI 데모 목적 샘플 금액/쿠폰 로직을 둠.
+ */
+const price = reactive({
+  base: quotedTotal.value ?? 240000, // Ready에서 가져온 총액이 있으면 사용
+  taxes: quotedTotal.value ? 0 : 24000,
+  fee:   quotedTotal.value ? 0 : 5000
+})
 const coupons = ref([
-  { id:'C10',  name:'10% 할인',              type:'percent', value:10,  minSpend:100000, desc:'10만원 이상 10%' },
-  { id:'F15',  name:'₩15,000 즉시 할인',       type:'amount',  value:15000, minSpend:0,      desc:'제한 없음' },
-  { id:'WKND', name:'주말 20% (최대 ₩30,000)', type:'percentCap', value:20, cap:30000, minSpend:150000, desc:'15만원 이상, 최대 3만원' },
+  { id:'C10',  name:'10% 할인',                 type:'percent',    value:10,    minSpend:100000, desc:'10만원 이상 10%' },
+  { id:'F15',  name:'₩15,000 즉시 할인',          type:'amount',     value:15000, minSpend:0,      desc:'제한 없음' },
+  { id:'WKND', name:'주말 20% (최대 ₩30,000)',    type:'percentCap', value:20,    cap:30000,       minSpend:150000, desc:'15만원 이상, 최대 3만원' },
 ])
-
-const selectedCoupon = ref(null)
-const subTotal = computed(()=> price.base + price.taxes + price.fee)
-
-const discount = computed(()=>{
+const selectedCoupon   = ref(null)
+const subTotal         = computed(()=> price.base + price.taxes + price.fee)
+const discount         = computed(()=>{
   const c = selectedCoupon.value
   if(!c) return 0
   let d = 0
-  if(c.type==='amount') d = c.value
-  else if(c.type==='percent') d = Math.round(price.base * (c.value/100))
-  else if(c.type==='percentCap'){ d = Math.round(price.base * (c.value/100)); d = Math.min(d, c.cap||d) }
+  if (c.type==='amount') d = c.value
+  else if (c.type==='percent') d = Math.round(price.base * (c.value/100))
+  else if (c.type==='percentCap') { d = Math.round(price.base * (c.value/100)); d = Math.min(d, c.cap||d) }
   return Math.min(d, subTotal.value)
 })
-const total = computed(()=> subTotal.value - discount.value)
-
-const applicableCoupons = computed(()=> coupons.value.filter(c => price.base >= (c.minSpend||0)))
-
-const showCouponModal = ref(false)
-const openCouponModal = ()=> showCouponModal.value = true
+const total            = computed(()=> subTotal.value - discount.value)
+const applicableCoupons= computed(()=> coupons.value.filter(c => price.base >= (c.minSpend||0)))
+const showCouponModal  = ref(false)
+const openCouponModal  = ()=> showCouponModal.value = true
 const closeCouponModal = ()=> showCouponModal.value = false
-const applyCoupon = (c)=>{ selectedCoupon.value = c; closeCouponModal() }
-const removeCoupon = ()=> selectedCoupon.value = null
+const applyCoupon      = (c)=>{ selectedCoupon.value = c; closeCouponModal() }
+const removeCoupon     = ()=> { selectedCoupon.value = null }
 
-/* ================= 예약자 정보 ================= */
-const guest = reactive({ name: '', phone: '' })
+/* ---------------------- 예약자 정보 ---------------------- */
+const guest    = reactive({ name: '', phone: '' })
 const guestErr = reactive({ name: '', phone: '' })
 
 function validateGuest() {
@@ -44,23 +125,23 @@ function validateGuest() {
   return !(guestErr.name || guestErr.phone)
 }
 
-/* ================= 보유 카드 / 카드 추가 모달 ================= */
+/* ---------------------- (샘플) 저장된 카드/카드 추가 ---------------------- */
 const cards = ref([{ id:1, brand:'VISA', last4:'4321', exp:'02/27', selected:true }])
 const hasCards = computed(()=> cards.value.length>0)
 const selectCard = (id)=> cards.value.forEach(c=>c.selected = c.id===id)
 
 const showAdd = ref(false)
-const saving = ref(false)
+const saving  = ref(false)
 const saveProfile = ref(true)
 const newCard = reactive({ number:'', exp:'', cvc:'', name:'', country:'Korea, Republic of' })
-const errors = reactive({ number:'', exp:'', cvc:'', name:'' })
+const errors  = reactive({ number:'', exp:'', cvc:'', name:'' })
 
 function resetForm(){
   newCard.number=''; newCard.exp=''; newCard.cvc=''; newCard.name=''; newCard.country='Korea, Republic of'
   errors.number=errors.exp=errors.cvc=errors.name=''
   saveProfile.value = true
 }
-const openAddCard = ()=> { resetForm(); showAdd.value = true }
+const openAddCard  = ()=> { resetForm(); showAdd.value = true }
 const closeAddCard = ()=> showAdd.value = false
 
 const formatCardNumber = v => v.replace(/\D/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 ')
@@ -100,7 +181,7 @@ async function submitCard(){
   } finally { saving.value = false }
 }
 
-/* ================= 토스 결제 위젯 ================= */
+/* ---------------------- 토스 결제 위젯 ---------------------- */
 const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY || 'test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm'
 const paymentMethodElId = 'pm-' + Math.random().toString(36).slice(2)
 const agreementElId     = 'ag-' + Math.random().toString(36).slice(2)
@@ -130,12 +211,16 @@ async function setupToss() {
 watch(total, async v => { if (tossWidgets) await tossWidgets.setAmount({ currency:'KRW', value:v }) })
 
 async function requestPay() {
+  if (expired.value) {
+    alert('홀드가 만료되어 결제를 진행할 수 없습니다. 처음 화면으로 돌아가 다시 예약해주세요.')
+    return
+  }
   if (!validateGuest()) return
   await tossWidgets.requestPayment({
     orderId: genOrderId(),
-    orderName: '호텔 예약 1박',
+    orderName: '호텔 예약',
     successUrl: window.location.origin + '/pay/success',
-    failUrl: window.location.origin + '/pay/fail',
+    failUrl:    window.location.origin + '/pay/fail',
     customerName: guest.name || '예약고객',
     customerMobilePhone: guest.phone.replace(/\D/g,''),
     customerEmail: 'guest@example.com'
@@ -147,29 +232,48 @@ onMounted(() => { setupToss().catch(console.error) })
 
 <template>
   <main class="reservation">
+    <!-- ✅ 상단 고정바: 홀드 코드 + 카운트다운 + 취소 버튼 -->
+    <div class="holdbar" :class="{ danger: expired || remainSec <= 30 }">
+      <div class="left">
+        <span class="tag">HOLD</span>
+        <span class="code">#{{ holdCode }}</span>
+        <span class="sep">|</span>
+        <span class="ttl" v-if="!expired">만료까지 <b>{{ remainText }}</b></span>
+        <span class="ttl expired" v-else>만료됨</span>
+      </div>
+      <div class="right">
+        <button class="btn sm outline" :disabled="cancelling" @click="cancelHold">
+          {{ cancelling ? '취소 중…' : '홀드 취소' }}
+        </button>
+      </div>
+    </div>
+
     <section class="grid">
-      <!-- 좌측 -->
+      <!-- 좌측: 본문 -->
       <article class="card">
         <header class="room-head">
-          <h2 class="room-title">Superior room - 1 더블베드 or 2 트윈 베드</h2>
-          <strong class="price">₩240,000<span class="unit">/night</span></strong>
+          <h2 class="room-title">예약 진행</h2>
+          <strong class="price">
+            {{ total.toLocaleString('ko-KR',{style:'currency',currency:'KRW'}) }}
+            <span class="unit">총액</span>
+          </strong>
         </header>
 
-        <div class="hotel-line">
-          <div class="badge"></div>
-          <div>
-            <div class="hotel-name">해또호텔</div>
-            <div class="hotel-addr">Gümüşsuyu Mah. İstiklal Cad. No8, Istanbul 34437</div>
-          </div>
+        <!-- 예약 개요 -->
+        <div class="panel">
+          <div class="panel-title">예약 개요</div>
+          <ul class="facts">
+            <li><b>호텔</b><span>{{ hotelId ?? '-' }}</span></li>
+            <li><b>객실타입</b><span>{{ roomTypeId ?? '-' }}</span></li>
+            <li><b>요금제</b><span>{{ ratePlanId ?? '-' }}</span></li>
+            <li><b>체크인</b><span>{{ checkIn || '-' }}</span></li>
+            <li><b>체크아웃</b><span>{{ checkOut || '-' }}</span></li>
+            <li><b>인원</b><span>{{ guests || 1 }}명</span></li>
+          </ul>
+          <p class="warn" v-if="expired">⚠️ 홀드가 만료되어 결제를 진행할 수 없습니다. 다시 예약을 시도해주세요.</p>
         </div>
 
-        <ul class="dates">
-          <li><div class="label">Thursday, Dec 8</div><div class="sub">Check-in</div></li>
-          <li class="sep"></li>
-          <li><div class="label">Friday, Dec 9</div><div class="sub">Check-out</div></li>
-        </ul>
-
-        <!-- ✅ 쿠폰 적용하기 -->
+        <!-- 쿠폰 -->
         <div class="panel coupon">
           <div class="panel-title">쿠폰 적용하기</div>
           <div class="coupon-row" v-if="selectedCoupon">
@@ -183,7 +287,7 @@ onMounted(() => { setupToss().catch(console.error) })
           </div>
         </div>
 
-        <!-- ✅ 예약자 정보 -->
+        <!-- 예약자 정보 -->
         <div class="panel guest">
           <div class="panel-title">예약자 정보</div>
           <div class="row gap">
@@ -215,13 +319,13 @@ onMounted(() => { setupToss().catch(console.error) })
           <button class="add-slot" @click="openAddCard"><span class="plus">+</span><span>Add a new card</span></button>
         </div>
 
-        <!-- ✅ 토스 결제 위젯 -->
+        <!-- 토스 결제 위젯 -->
         <div class="panel">
           <div class="panel-title">결제하기</div>
           <div :id="paymentMethodElId" style="margin-top:10px"></div>
           <div :id="agreementElId" style="margin-top:10px"></div>
-          <button class="btn primary" style="margin-top:12px" @click="requestPay">
-            결제 진행 (총액 {{ total.toLocaleString('ko-KR',{style:'currency',currency:'KRW'}) }})
+          <button class="btn primary" style="margin-top:12px" :disabled="expired" @click="requestPay">
+            {{ expired ? '만료됨' : '결제 진행' }} (총액 {{ total.toLocaleString('ko-KR',{style:'currency',currency:'KRW'}) }})
           </button>
         </div>
       </article>
@@ -231,8 +335,8 @@ onMounted(() => { setupToss().catch(console.error) })
         <div class="sum-head">
           <img class="thumb" src="https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&q=60" alt="" />
           <div class="sum-txt">
-            <div class="sum-hotel">CVK Park Bosphorus…</div>
-            <div class="sum-room">Superior room - 1 더블베드 or 2 트윈 베드</div>
+            <div class="sum-hotel">호텔 #{{ hotelId ?? '-' }}</div>
+            <div class="sum-room">룸타입 #{{ roomTypeId ?? '-' }}</div>
           </div>
         </div>
 
@@ -313,40 +417,41 @@ onMounted(() => { setupToss().catch(console.error) })
 </template>
 
 <style scoped>
-/* ====== 라이트 테마 팔레트 (로그인 화면 톤) ====== */
-:root{
-  --bg:#f5f8ff;          /* 페이지 배경 - 아주 연한 하늘색 */
-  --card:#ffffff;        /* 카드 배경 */
-  --line:#e6eef8;        /* 카드/패널 선 */
-  --txt:#0f172a;         /* 본문 텍스트(진한 남색) */
-  --muted:#6b7280;       /* 서브 텍스트 */
-  --primary:#2563eb;     /* 버튼 파란색 */
-  --primary-2:#1d4ed8;   /* 버튼 hover */
-  --accent:#60a5fa;      /* 보조 파랑 */
+/* ===== 상단 홀드 바 ===== */
+.holdbar{
+  position: sticky; top: 0; z-index: 30;
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 10px 12px; margin: -8px 0 12px;
+  background:#0f172a; color:#e5edff; border-radius:10px;
+  border:1px solid #1f2a44;
 }
+.holdbar .tag{font-weight:900; font-size:12px; padding:4px 6px; border-radius:6px; background:#1d4ed8; margin-right:6px}
+.holdbar .code{font-weight:800}
+.holdbar .sep{opacity:.5; margin:0 10px}
+.holdbar .ttl b{font-variant-numeric: tabular-nums}
+.holdbar .ttl.expired{color:#fca5a5; font-weight:800}
+.holdbar.danger{background:#111827; border-color:#4b5563}
 
-/* 레이아웃 */
+/* ====== 라이트 테마 팔레트 (기존 스타일 유지) ====== */
+:root{
+  --bg:#f5f8ff;--card:#ffffff;--line:#e6eef8;--txt:#0f172a;--muted:#6b7280;--primary:#2563eb;--primary-2:#1d4ed8;--accent:#60a5fa;
+}
 .reservation{width:100%;min-height:100vh;margin:0;padding:24px clamp(12px,2.5vw,36px);box-sizing:border-box;background:var(--bg);}
 .reservation .grid{display:grid;grid-template-columns:minmax(680px,3.2fr) minmax(420px,1.2fr);gap:clamp(20px,2vw,36px);align-items:start;}
 @media (min-width:1400px){.reservation .grid{grid-template-columns:3.6fr 1fr}}
 @media (min-width:1800px){.reservation .grid{grid-template-columns:4fr 1fr}}
 @media (max-width:960px){.reservation .grid{grid-template-columns:1fr}}
 .card,.summary{width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;color:var(--txt);box-shadow:0 8px 24px rgba(15,23,42,.06)}
-
-/* 헤더 */
 .room-head{display:flex;align-items:flex-start;gap:12px;justify-content:space-between}
 .room-title{margin:0;font-size:22px;font-weight:800;color:var(--txt);line-height:1.2}
 .price{color:#f43f5e;font-weight:800}.price .unit{font-size:.8em;color:var(--muted);margin-left:4px}
-.hotel-line{display:flex;gap:10px;align-items:center;margin:14px 0}
-.badge{width:36px;height:28px;border-radius:6px;background:#eef4ff;border:1px dashed #cfe0ff}
-.hotel-name{font-weight:700;color:var(--txt)}.hotel-addr{color:var(--muted);font-size:13px}
-.dates{list-style:none;margin:10px 0 16px;padding:0;display:flex;align-items:center;gap:18px}
-.dates .label{font-weight:700;color:var(--txt)}.dates .sub{color:var(--muted);font-size:13px}
-.dates .sep{flex:0 0 24px;height:1px;background:var(--line)}
 
-/* 패널 */
+/* 패널/리스트 */
 .panel{border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0;background:#f8fbff}
 .panel-title{font-weight:800;color:var(--txt)}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:8px;list-style:none;padding:0;margin:10px 0 0}
+.facts li{display:flex;justify-content:space-between;padding:8px 12px;border:1px dashed #dbe8ff;border-radius:10px;background:#fff}
+.warn{margin-top:8px;color:#b91c1c;font-weight:700}
 
 /* 쿠폰 */
 .panel.coupon{background:#f1f7ff;border-color:#dbe8ff}
@@ -376,7 +481,6 @@ onMounted(() => { setupToss().catch(console.error) })
 .card-row .exp{color:#64748b;font-size:13px;margin-left:auto;margin-right:28px}
 .card-row .radio{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;border:2px solid #3b82f6;background:#e8f0ff}
 .card-row.active{background:#e7f0ff;border-color:#bfd7ff}
-
 .add-slot{width:100%;margin-top:10px;padding:20px;border:2px dashed #cfe0ff;border-radius:10px;background:#fff;color:#6b7280;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}
 .add-slot .plus{font-size:22px;line-height:1;color:#3b82f6}
 
@@ -395,13 +499,11 @@ onMounted(() => { setupToss().catch(console.error) })
 .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .modal-head h3{margin:0;font-size:20px;font-weight:800}
 .x{background:transparent;border:0;font-size:24px;color:#334155;cursor:pointer;line-height:1}
-
 .coupon-list{display:grid;gap:10px}
 .coupon-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border-radius:12px;border:1px solid #dfe9ff;background:#f6f9ff;cursor:pointer}
 .cname{font-weight:800;color:#0f172a}.cdesc{color:#64748b;font-size:13px}
 .apply{font-weight:800;color:#1d4ed8}
 .empty{text-align:center;color:#64748b;padding:18px 6px}
-
 .form{display:grid;gap:10px;margin-top:10px}
 .label{font-size:14px;color:#1e3a8a;font-weight:700}
 .rel{position:relative}.brandchip{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;font-weight:800;background:#eef4ff;color:#1e293b;padding:4px 6px;border-radius:6px}
@@ -415,4 +517,3 @@ onMounted(() => { setupToss().catch(console.error) })
 html body{display:block !important;place-items:unset !important;}
 #app{max-width:none !important;width:100% !important;margin:0 !important;padding:0 !important;display:block !important;grid-template-columns:none !important;}
 </style>
-
